@@ -187,6 +187,7 @@ class InvoiceApp:
         controls.pack(fill=X)
         Entry(controls, textvariable=self.path_text, state="readonly", width=80).pack(side=LEFT, fill=X, expand=True, padx=(0, 8))
         Button(controls, text="Browse folder", command=self.choose_folder, padx=14).pack(side=LEFT)
+        Button(controls, text="Run / Process", command=self.load_folder, padx=14).pack(side=LEFT, padx=(8, 0))
         Button(controls, text="Export Excel", command=self.export, padx=14).pack(side=LEFT, padx=(8, 0))
 
         summary = Frame(self.root, padx=22)
@@ -215,9 +216,11 @@ class InvoiceApp:
         if selected:
             self.folder = Path(selected)
             self.path_text.set(str(self.folder))
-            self.load_folder()
 
     def load_folder(self):
+        if not self.folder:
+            messagebox.showinfo("Choose a folder first", "Click Browse folder and select your invoice folder.")
+            return
         self.status.set("Reading invoices...")
         self.root.update_idletasks()
         threading.Thread(target=self._load_folder_worker, daemon=True).start()
