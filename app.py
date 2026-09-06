@@ -194,8 +194,8 @@ class InvoiceApp:
         self.metric = Label(summary, text="No data loaded", font=("Helvetica", 11, "bold"))
         self.metric.pack(anchor="w", pady=(0, 10))
 
-        table_frame = Frame(self.root, padx=22, pady=(0, 14))
-        table_frame.pack(fill=BOTH, expand=True)
+        table_frame = Frame(self.root, padx=22, pady=0)
+        table_frame.pack(fill=BOTH, expand=True, pady=(0, 14))
         columns = ("meter", "month", "usage", "days", "invoice")
         self.table = ttk.Treeview(table_frame, columns=columns, show="headings")
         headings = {"meter": "Meter number", "month": "Billing month", "usage": "Prorated usage (kWh)", "days": "Billed days", "invoice": "Invoice file"}
