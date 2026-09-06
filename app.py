@@ -135,6 +135,37 @@ def load_workbook_rows(path: Path) -> list[MonthlyUsage]:
     return sorted(rows, key=lambda row: (row.meter, row.month))
 
 
+def load_invoices_from_workbook(path: Path) -> list[Invoice]:
+    workbook = load_workbook(path, data_only=True)
+    if "Electricity invoices" not in workbook.sheetnames:
+        return []
+    sheet = workbook["Electricity invoices"]
+    headers = [cell.value for cell in sheet[1]]
+    required = ["Invoice file", "Billing period start", "Billing period end", "Meter number", "Total usage (kWh)"]
+    if any(header not in headers for header in required):
+        return []
+    indexes = {header: headers.index(header) for header in required}
+    invoices = []
+    for values in sheet.iter_rows(min_row=2, values_only=True):
+        if not values[indexes["Invoice file"]]:
+            continue
+        start = values[indexes["Billing period start"]]
+        end = values[indexes["Billing period end"]]
+        if isinstance(start, datetime):
+            start = start.date()
+        if isinstance(end, datetime):
+            end = end.date()
+        invoices.append(Invoice(
+            filename=str(values[indexes["Invoice file"]]),
+            start=start,
+            end=end,
+            meter=str(values[indexes["Meter number"]]),
+            usage=float(values[indexes["Total usage (kWh)"]]),
+            source="Existing workbook",
+        ))
+    return invoices
+
+
 def export_workbook(folder: Path, invoices: list[Invoice], monthly_rows: list[MonthlyUsage]) -> Path:
     output = folder / "electricity_invoice_summary.xlsx"
     workbook = Workbook()
@@ -197,17 +228,24 @@ class InvoiceApp:
 
         table_frame = Frame(self.root, padx=22, pady=0)
         table_frame.pack(fill=BOTH, expand=True, pady=(0, 14))
-        columns = ("meter", "month", "usage", "days", "invoice")
-        self.table = ttk.Treeview(table_frame, columns=columns, show="headings")
-        headings = {"meter": "Meter number", "month": "Billing month", "usage": "Prorated usage (kWh)", "days": "Billed days", "invoice": "Invoice file"}
-        widths = {"meter": 150, "month": 150, "usage": 190, "days": 110, "invoice": 390}
-        for column in columns:
-            self.table.heading(column, text=headings[column])
-            self.table.column(column, width=widths[column], anchor="w")
-        scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.table.yview)
-        self.table.configure(yscrollcommand=scroll.set)
-        self.table.pack(side=LEFT, fill=BOTH, expand=True)
-        scroll.pack(side=RIGHT, fill=Y)
+        tabs = ttk.Notebook(table_frame)
+        tabs.pack(fill=BOTH, expand=True)
+        monthly_tab = Frame(tabs)
+        invoice_tab = Frame(tabs)
+        tabs.add(monthly_tab, text="Monthly summary")
+        tabs.add(invoice_tab, text="Invoice details")
+        self.monthly_table = self.make_table(
+            monthly_tab,
+            ("meter", "month", "usage", "days", "invoice"),
+            {"meter": "Meter number", "month": "Billing month", "usage": "Prorated usage (kWh)", "days": "Billed days", "invoice": "Invoice file"},
+            {"meter": 150, "month": 150, "usage": 190, "days": 110, "invoice": 390},
+        )
+        self.invoice_table = self.make_table(
+            invoice_tab,
+            ("invoice", "start", "end", "meter", "usage", "source"),
+            {"invoice": "Invoice file", "start": "Billing period start", "end": "Billing period end", "meter": "Meter number", "usage": "Total usage (kWh)", "source": "Source"},
+            {"invoice": 350, "start": 150, "end": 150, "meter": 140, "usage": 170, "source": 280},
+        )
 
         Label(self.root, textvariable=self.status, relief="sunken", anchor="w", padx=10).pack(side="bottom", fill=X)
 
@@ -230,7 +268,7 @@ class InvoiceApp:
             workbook_files = sorted(self.folder.glob("*.xlsx"))
             if workbook_files:
                 rows = load_workbook_rows(workbook_files[0])
-                invoices = []
+                invoices = load_invoices_from_workbook(workbook_files[0])
                 message = f"Loaded {workbook_files[0].name}."
             else:
                 pdf_files = sorted(self.folder.glob("*.pdf"))
@@ -247,15 +285,32 @@ class InvoiceApp:
     def show_rows(self, invoices, rows, message):
         self.invoices = invoices
         self.monthly_rows = rows
-        for item in self.table.get_children():
-            self.table.delete(item)
+        for item in self.monthly_table.get_children():
+            self.monthly_table.delete(item)
         for row in rows:
-            self.table.insert("", END, values=(row.meter, row.month.strftime("%B %Y"), f"{row.usage:,.2f}", row.billed_days or "-", row.invoice_file))
+            self.monthly_table.insert("", END, values=(row.meter, row.month.strftime("%B %Y"), f"{row.usage:,.2f}", row.billed_days or "-", row.invoice_file))
+        for item in self.invoice_table.get_children():
+            self.invoice_table.delete(item)
+        for invoice in invoices:
+            self.invoice_table.insert("", END, values=(invoice.filename, invoice.start.isoformat(), invoice.end.isoformat(), invoice.meter, f"{invoice.usage:,.2f}", invoice.source))
         total = sum(row.usage for row in rows)
         meters = len({row.meter for row in rows})
         months = len({row.month for row in rows})
         self.metric.config(text=f"{meters} meter(s)  |  {months} billing month(s)  |  {total:,.2f} kWh total")
         self.status.set(message)
+
+    def make_table(self, parent, columns, headings, widths):
+        frame = Frame(parent)
+        frame.pack(fill=BOTH, expand=True)
+        table = ttk.Treeview(frame, columns=columns, show="headings")
+        for column in columns:
+            table.heading(column, text=headings[column])
+            table.column(column, width=widths[column], anchor="w")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=table.yview)
+        table.configure(yscrollcommand=scroll.set)
+        table.pack(side=LEFT, fill=BOTH, expand=True)
+        scroll.pack(side=RIGHT, fill=Y)
+        return table
 
     def export(self):
         if not self.monthly_rows:
